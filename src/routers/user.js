@@ -1,20 +1,26 @@
 import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
+import pdf from 'pdf-parse';
+import PDFExtract from 'pdf-extract';
 import { User } from '../models/user.js';
 import { auth } from '../middleware/auth.js';
 import { Task } from '../models/task.js';
+import { PythonShell } from 'python-shell';
 import { sendByeEmail, sendWelcomeEmail } from '../emails/account.js';
+
+
+// const pdfParser = new pdf();
 
 
 
 const upload = multer({
     limits: {
-        fileSize: 1000000
+        fileSize: 3000000
     },
     fileFilter(req, file, cb) {
 
-        if (!file.originalname.match(/\.(jpg|jpeg|png)$/)) {
+        if (!file.originalname.match(/\.(jpg|jpeg|png|pdf)$/)) {
 
             return cb(new Error('Please Upload (PNG,JPEG,JPG)'))
 
@@ -34,7 +40,7 @@ userRouter.post('/users', async (req, res) => {
     const user = new User(req.body)
     try {
         await user.save()
-        sendWelcomeEmail(user.email,user.name)
+        sendWelcomeEmail(user.email, user.name)
         const token = await user.generateAuthToken()
         res.status(201).send({ user, token })
     } catch (e) {
@@ -106,7 +112,7 @@ userRouter.delete('/users/me', auth, async (req, res) => {
     try {
         await req.user.deleteOne({ _id: req.user.id })
         await Task.deleteMany({ owner: req.user.id })
-        sendByeEmail(req.user.email,req.user.name)
+        sendByeEmail(req.user.email, req.user.name)
         res.send(req.user)
     } catch (e) {
         console.log(e)
@@ -134,6 +140,12 @@ userRouter.get('/users/:id/avatar', upload.single('avatar'), async (req, res) =>
 
 userRouter.post('/users/me/avatar', auth, upload.single('avatar'), async (req, res) => {
     const buffer = await sharp(req.file.buffer).resize({ width: 250, height: 250 }).png().toBuffer()
+    // const buffer = req.file.buffer
+    // pdf(buffer).then(function (data) {
+    //     console.log(data.text)
+    // })
+    // console.log(buffer)
+
     req.user.avatar = buffer
     await req.user.save()
     res.send()
@@ -150,3 +162,24 @@ userRouter.delete('/users/me/avatar', auth, async (req, res) => {
     res.status(400).send({ error: error.message })
 })
 
+userRouter.post('/users/me/pdf', auth, upload.single('pdf'), async (req, res) => {
+    // const buffer = await sharp(req.file.buffer).resize({ width: 250, height: 250 }).png().toBuffer()
+    const buffer = req.file.buffer
+    let text = ''
+    await pdf(buffer).then(function (data) {
+        text = data.text
+        console.log(data.text)
+    })
+
+    let options = {
+        args: text
+    };
+    // console.log(text)
+
+    PythonShell.run('./src/routers/Splitter.py', options).then(messages => {
+        console.log(messages);    
+        res.send(messages)
+    });
+}, (error, req, res, next) => {
+    res.status(400).send({ error: error.message })
+})   
